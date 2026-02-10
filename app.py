@@ -1,134 +1,135 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
 
 st.set_page_config(layout="wide")
 
-# =====================================================
-# 포트폴리오 정의
-# =====================================================
-PORT_INFO = {
-    "SPY": {"weight": 0.10, "reason": "US Large Cap"},
-    "QQQ": {"weight": 0.15, "reason": "Nasdaq Growth"},
-    "VTI": {"weight": 0.10, "reason": "Total Market"},
+st.title("📊 AI Portfolio Advisor Pro")
 
-    "TQQQ": {"weight": 0.15, "reason": "Leveraged Nasdaq"},
-    "UPRO": {"weight": 0.10, "reason": "Leveraged S&P"},
-    "TECL": {"weight": 0.10, "reason": "Tech Leveraged"},
+# -----------------------------
+# 1. 추천 종목 데이터
+# -----------------------------
+@st.cache_data
+def load_recommendations():
+    data = {
+        "Ticker": [
+            "QQQ","SPY","VTI","VXUS","BND",
+            "SOXX","SCHD","VIG","ARKK","VNQ"
+        ],
+        "ExpectedReturn": [12, 9, 8, 7, 3, 15, 8, 7, 18, 6],
+        "Risk": [
+            "Medium","Low","Low","Medium","Very Low",
+            "High","Low","Low","Very High","Medium"
+        ],
+        "Reason": [
+            "나스닥 기술주 성장",
+            "미국 대표지수 추종",
+            "미국 전체시장 분산",
+            "글로벌 분산",
+            "채권 안정성",
+            "반도체 집중 투자",
+            "배당 + 가치주",
+            "배당 성장주",
+            "혁신 기술 투자",
+            "리츠 배당"
+        ]
+    }
+    return pd.DataFrame(data)
 
-    "SMH": {"weight": 0.10, "reason": "Semiconductor"},
-    "BOTZ": {"weight": 0.05, "reason": "AI & Robotics"},
-    "SKYY": {"weight": 0.05, "reason": "Cloud"},
+df = load_recommendations()
 
-    "SCHD": {"weight": 0.07, "reason": "Dividend Quality"},
-    "TLT": {"weight": 0.03, "reason": "Long Treasury"}
+# -----------------------------
+# 2. 비중 자동 계산 (리스크 기반)
+# -----------------------------
+risk_score = {
+    "Very Low": 1,
+    "Low": 2,
+    "Medium": 3,
+    "High": 4,
+    "Very High": 5,
 }
 
-TICKERS = list(PORT_INFO.keys())
+df["RiskScore"] = df["Risk"].map(risk_score)
 
-# =====================================================
-# 데이터 다운로드
-# =====================================================
-@st.cache_data(ttl=3600)
-def load_data(tickers):
-    data = yf.download(tickers, period="1y", auto_adjust=True)
-    return data
+# 위험 낮을수록 높은 비중
+df["Weight"] = (1 / df["RiskScore"])
+df["Weight"] = df["Weight"] / df["Weight"].sum() * 100
 
-prices = load_data(TICKERS)
+# -----------------------------
+# 3. 기대 수익률 계산
+# -----------------------------
+port_return = np.sum(df["ExpectedReturn"] * df["Weight"] / 100)
 
-if prices.empty:
-    st.stop()
+# NaN, None 방지
+if pd.isna(port_return):
+    port_return = 0.0
 
-# =====================================================
-# 수익률 계산
-# =====================================================
-returns = prices.pct_change().dropna()
+# -----------------------------
+# 4. 화면 좌우 분할
+# -----------------------------
+left, right = st.columns(2)
 
-# MultiIndex 제거
-if isinstance(returns.columns, pd.MultiIndex):
-    returns.columns = returns.columns.get_level_values(-1)
-
-exp_returns = returns.mean() * 252
-volatility = returns.std() * np.sqrt(252)
-
-# =====================================================
-# 포트폴리오 기대값 계산
-# =====================================================
-weights = np.array([PORT_INFO[t]["weight"] for t in TICKERS])
-
-port_return = sum(exp_returns[t] * PORT_INFO[t]["weight"] for t in TICKERS) * 100
-port_vol = sum(volatility[t] * PORT_INFO[t]["weight"] for t in TICKERS) * 100
-
-# =====================================================
-# 상단 KPI
-# =====================================================
-st.title("Portfolio Strategy Dashboard")
-
-k1, k2, k3 = st.columns(3)
-k1.metric("Expected Return (1Y)", f"{port_return:.2f}%")
-k2.metric("Volatility (1Y)", f"{port_vol:.2f}%")
-k3.metric("Number of Assets", len(TICKERS))
-
-st.divider()
-
-# =====================================================
-# 메인 좌/우
-# =====================================================
-left, right = st.columns([2, 1])
-
-# =====================================================
-# 자산 구성 테이블
-# =====================================================
+# -----------------------------
+# LEFT : 안정 포트폴리오 + 추천 비중
+# -----------------------------
 with left:
-    st.subheader("Asset Allocation")
+    st.subheader("📦 추천 포트폴리오 & 비중")
 
-    table = pd.DataFrame({
-        "Ticker": TICKERS,
-        "Weight": [PORT_INFO[t]["weight"] * 100 for t in TICKERS],
-        "Exp Return": [exp_returns[t] * 100 for t in TICKERS],
-        "Volatility": [volatility[t] * 100 for t in TICKERS],
-        "Role": [PORT_INFO[t]["reason"] for t in TICKERS],
-    })
+    for _, row in df.iterrows():
 
-    st.dataframe(
-        table.style.format({
-            "Weight": "{:.1f}%",
-            "Exp Return": "{:.1f}%",
-            "Volatility": "{:.1f}%"
-        }),
-        use_container_width=True
-    )
+        risk_color = {
+            "Very Low": "🟢",
+            "Low": "🟢",
+            "Medium": "🟡",
+            "High": "🟠",
+            "Very High": "🔴",
+        }[row["Risk"]]
 
-# =====================================================
-# 리스크 & 리밸런싱
-# =====================================================
+        st.markdown(
+            f"""
+            **{row['Ticker']}**  
+            비중: **{row['Weight']:.1f}%**  
+            기대수익률: **{row['ExpectedReturn']}%**  
+            위험도: {risk_color} {row['Risk']}  
+            이유: {row['Reason']}
+            """
+        )
+        st.divider()
+
+# -----------------------------
+# RIGHT : 포트폴리오 요약
+# -----------------------------
 with right:
-    st.subheader("Risk Monitor")
+    st.subheader("📈 포트폴리오 요약")
 
-    drift = np.abs(weights - weights.mean())
+    k1, k2 = st.columns(2)
 
-    if drift.max() > 0.08:
-        st.error("Rebalancing Required")
+    k1.metric("Expected Return (1Y)", f"{float(port_return):.2f}%")
+    k2.metric("종목 수", len(df))
+
+    # 목표 수익 설정
+    st.subheader("🎯 목표 수익 알림")
+
+    target = st.slider("목표 수익률 (%)", 5, 30, 15)
+
+    if port_return >= target:
+        st.success("목표 수익률 달성 가능성이 있습니다!")
     else:
-        st.success("Allocation Stable")
+        st.info("현재 기준으로 목표 수익에 조금 부족합니다.")
 
-    st.divider()
+    # 리밸런싱 체크
+    st.subheader("🔄 리밸런싱 추천")
 
-    st.subheader("Weight Distribution")
-    weight_df = pd.DataFrame({"weight": weights}, index=TICKERS)
-    st.bar_chart(weight_df)
+    high_risk_ratio = df[df["RiskScore"] >= 4]["Weight"].sum()
 
-# =====================================================
-# 성과 차트
-# =====================================================
-st.divider()
-st.subheader("Cumulative Performance (1Y)")
+    if high_risk_ratio > 40:
+        st.warning("고위험 자산 비중이 높습니다. 일부를 채권/배당 ETF로 이동 추천.")
+    else:
+        st.success("리스크 균형이 적절합니다.")
 
-cum = (1 + returns).cumprod()
-
-# MultiIndex 방어
-if isinstance(cum.columns, pd.MultiIndex):
-    cum.columns = cum.columns.get_level_values(-1)
-
-st.line_chart(cum)
+# -----------------------------
+# 5. 리셋 버튼
+# -----------------------------
+if st.button("🔄 추천 포트폴리오 리셋"):
+    st.cache_data.clear()
+    st.experimental_rerun()
