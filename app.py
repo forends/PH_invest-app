@@ -1,106 +1,110 @@
 import streamlit as st
-import yfinance as yf
-import pandas as pd
 
-st.title("🚀 공격형 포트폴리오 운용 시스템 PRO")
+# ==============================
+# 기본 포트폴리오 세트
+# ==============================
+DEFAULT_PORT = ["QQQ", "SPY", "SCHD", "TLT"]
+AGGRESSIVE_PORT = ["TQQQ", "SOXL", "UPRO"]
+DIVIDEND_PORT = ["SCHD", "VYM", "HDV"]
 
-# =====================================================
-# 투자금 & 보유 수량 입력
-# =====================================================
-st.header("💼 내 보유 현황 입력")
+# ==============================
+# 세션 상태 초기화
+# ==============================
+if "recommended" not in st.session_state:
+    st.session_state.recommended = DEFAULT_PORT.copy()
 
-tickers = ["QQQ", "SOXL", "TQQQ", "SMH", "NVDA", "TSLA"]
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-qty_dict = {}
+# ==============================
+# 제목
+# ==============================
+st.title("📊 ETF 포트폴리오 추천기")
 
-for t in tickers:
-    qty_dict[t] = st.number_input(f"{t} 보유 수량", value=0)
+# ==============================
+# 현재 보유 종목 표시
+# ==============================
+st.subheader("현재 추천 종목")
+st.write(st.session_state.recommended)
 
-# =====================================================
-# 목표 비중
-# =====================================================
-weights = {
-    "QQQ": 0.25,
-    "SOXL": 0.20,
-    "TQQQ": 0.15,
-    "SMH": 0.15,
-    "NVDA": 0.15,
-    "TSLA": 0.10
-}
 
-# =====================================================
-# 실행 버튼
-# =====================================================
-if st.button("분석 시작"):
+# ==============================
+# 상태 저장 함수 (Undo용)
+# ==============================
+def save_history():
+    st.session_state.history.append(st.session_state.recommended.copy())
 
-    raw = yf.download(tickers, period="1y", auto_adjust=True)
 
-    if isinstance(raw.columns, pd.MultiIndex):
-        data = raw["Close"]
+# ==============================
+# 리셋 / 변경 버튼 구역
+# ==============================
+st.subheader("포트폴리오 관리")
+
+col1, col2 = st.columns(2)
+
+# 🔄 기본형 복구
+if col1.button("🔄 기본형"):
+    save_history()
+    st.session_state.recommended = DEFAULT_PORT.copy()
+    st.success("기본 포트폴리오로 변경되었습니다.")
+    st.rerun()
+
+# 🚀 공격형
+if col2.button("🚀 공격형"):
+    save_history()
+    st.session_state.recommended = AGGRESSIVE_PORT.copy()
+    st.success("공격형 포트폴리오로 변경되었습니다.")
+    st.rerun()
+
+
+col3, col4 = st.columns(2)
+
+# 💰 배당형
+if col3.button("💰 배당형"):
+    save_history()
+    st.session_state.recommended = DIVIDEND_PORT.copy()
+    st.success("배당형 포트폴리오로 변경되었습니다.")
+    st.rerun()
+
+# ❌ 전체 삭제
+if col4.button("❌ 전체 삭제"):
+    save_history()
+    st.session_state.recommended = []
+    st.warning("모든 종목이 제거되었습니다.")
+    st.rerun()
+
+
+# ==============================
+# ↩ 이전 상태 복구
+# ==============================
+if st.button("↩ 이전 상태로 되돌리기"):
+    if st.session_state.history:
+        st.session_state.recommended = st.session_state.history.pop()
+        st.info("이전 포트폴리오로 복구되었습니다.")
+        st.rerun()
     else:
-        data = raw
+        st.error("되돌릴 기록이 없습니다.")
 
-    price = data.iloc[-1]
 
-    # =================================================
-    # 현재 평가금액 계산
-    # =================================================
-    current_values = {t: qty_dict[t] * price[t] for t in tickers}
-    total_money = sum(current_values.values())
+# ==============================
+# 종목 직접 추가
+# ==============================
+st.subheader("종목 추가")
 
-    st.subheader("💰 현재 평가금액")
-    st.write(f"총 자산: ${int(total_money):,}")
+new_item = st.text_input("추가할 ETF 티커 입력")
 
-    df_now = pd.DataFrame(
-        [[t, qty_dict[t], round(price[t],2), int(current_values[t])] for t in tickers],
-        columns=["종목", "보유수량", "현재가", "평가금액"]
-    )
-    st.dataframe(df_now)
-
-    # =================================================
-    # 수익률 (최근 3개월)
-    # =================================================
-    ret = data.pct_change(63).iloc[-1]
-    st.subheader("📈 3개월 수익률")
-    st.dataframe(ret.sort_values(ascending=False))
-
-    # =================================================
-    # 시장 위험 판단 (QQQ 기준)
-    # =================================================
-    ma50 = data.rolling(50).mean().iloc[-1]["QQQ"]
-    ma200 = data.rolling(200).mean().iloc[-1]["QQQ"]
-
-    st.subheader("🚨 시장 위험 신호")
-
-    if ma50 < ma200:
-        st.error("하락장 가능성 ↑ 레버리지 비중 줄이기 권장")
+if st.button("➕ 종목 추가"):
+    if new_item:
+        save_history()
+        st.session_state.recommended.append(new_item.upper())
+        st.success(f"{new_item.upper()} 추가 완료!")
+        st.rerun()
     else:
-        st.success("상승 추세 👍 공격적 운용 가능")
+        st.error("티커를 입력하세요.")
 
-    # =================================================
-    # 리밸런싱 계산
-    # =================================================
-    st.subheader("🎯 리밸런싱 매매 제안")
 
-    orders = []
-
-    for t in tickers:
-        target_amount = total_money * weights[t]
-        diff_money = target_amount - current_values[t]
-        qty = diff_money / price[t]
-
-        if diff_money > 0:
-            action = "매수"
-        elif diff_money < 0:
-            action = "매도"
-        else:
-            action = "유지"
-
-        orders.append([t, action, int(abs(diff_money)), int(abs(qty))])
-
-    df_orders = pd.DataFrame(
-        orders,
-        columns=["종목", "액션", "주문금액($)", "주문수량(주)"]
-    )
-
-    st.dataframe(df_orders)
+# ==============================
+# 알림 영역
+# ==============================
+st.sidebar.header("📢 알림")
+st.sidebar.write("포트폴리오 변경 시 메시지가 표시됩니다.")
