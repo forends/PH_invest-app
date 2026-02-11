@@ -149,7 +149,65 @@ with right:
 
     st.divider()
 
-    # =====================================================
+    #
+
+// AdvancedAnalytics.tsx
+import React, { useMemo } from "react";
+
+interface Holding {
+  ticker: string;
+  weight: number;
+  return: number;
+}
+
+interface Props {
+  holdings: Holding[];
+  marketReturn: number;
+  riskFree: number;
+}
+
+export default function AdvancedAnalytics({
+  holdings,
+  marketReturn,
+  riskFree,
+}: Props) {
+  const portfolioReturn = useMemo(
+    () => holdings.reduce((s, h) => s + h.weight * h.return, 0),
+    [holdings]
+  );
+
+  const beta = portfolioReturn / marketReturn;
+
+  const excess = portfolioReturn - riskFree;
+
+  const contribution = holdings.map((h) => ({
+    ticker: h.ticker,
+    value: h.weight * h.return,
+  }));
+
+  const var95 = portfolioReturn * 2.33; // 단순 모델
+
+  return (
+    <div className="space-y-4">
+      <div className="p-4 shadow rounded-2xl">
+        <h2 className="font-bold text-lg mb-2">리스크 분석</h2>
+        <p>베타: {beta.toFixed(2)}</p>
+        <p>초과 수익률: {(excess * 100).toFixed(2)}%</p>
+        <p>95% VaR: {(var95 * 100).toFixed(2)}%</p>
+      </div>
+
+      <div className="p-4 shadow rounded-2xl">
+        <h2 className="font-bold text-lg mb-2">종목 기여도</h2>
+        {contribution.map((c) => (
+          <div key={c.ticker} className="flex justify-between">
+            <span>{c.ticker}</span>
+            <span>{(c.value * 100).toFixed(2)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+} =====================================================
     # 용어 해설
     # =====================================================
     st.subheader("용어 설명")
