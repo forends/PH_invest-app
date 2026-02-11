@@ -5,23 +5,20 @@ import numpy as np
 import random
 
 st.set_page_config(layout="wide")
+st.title("Professional Portfolio System")
 
-st.title("AI Portfolio Advisor")
-
-# ---------------------------------
-# 기본 설정
-# ---------------------------------
-UNIVERSE = [
+# =====================================================
+# 투자 유니버스
+# =====================================================
+STOCK_UNIVERSE = [
     "SPY","QQQ","VTI","IWM","VEA","VWO",
     "TLT","IEF","GLD",
     "AAPL","MSFT","NVDA","AMZN","GOOGL"
 ]
 
-TARGET_RETURN = 10  # %
-
-# ---------------------------------
+# =====================================================
 # 데이터 로드
-# ---------------------------------
+# =====================================================
 @st.cache_data
 def load_price(tickers):
     df = yf.download(tickers, period="1y", auto_adjust=True, progress=False)
@@ -29,15 +26,14 @@ def load_price(tickers):
         df = df["Close"]
     return df.dropna(how="all")
 
-# ---------------------------------
-# 전략 기반 추천 종목 생성
-# ---------------------------------
+# =====================================================
+# 포트폴리오 생성
+# =====================================================
 def generate_portfolio():
-    picks = random.sample(UNIVERSE, 8)
+    picks = random.sample(STOCK_UNIVERSE, 8)
     weights = np.random.dirichlet(np.ones(len(picks)), size=1)[0]
     return picks, weights
 
-# 세션 상태
 if "picks" not in st.session_state:
     st.session_state.picks, st.session_state.weights = generate_portfolio()
 
@@ -46,109 +42,76 @@ weights = st.session_state.weights
 
 prices = load_price(picks)
 
-# ---------------------------------
+# =====================================================
 # 수익률 계산
-# ---------------------------------
+# =====================================================
 returns = prices.pct_change().dropna()
 
 mean_returns = returns.mean() * 252
 cov = returns.cov() * 252
 
-port_return = float(np.dot(weights, mean_returns) * 100)
-port_vol = float(np.sqrt(np.dot(weights.T, np.dot(cov, weights))) * 100)
+# 기본 기대 수익 & 변동성
+exp_return = float(np.dot(weights, mean_returns) * 100)
+volatility = float(np.sqrt(np.dot(weights.T, np.dot(cov, weights))) * 100)
 
-# ---------------------------------
-# 위험도 색상
-# ---------------------------------
-if port_vol < 10:
-    risk_color = "🟢 낮음"
-elif port_vol < 20:
-    risk_color = "🟡 보통"
-else:
-    risk_color = "🔴 높음"
+# =====================================================
+# 누적 수익률 (백테스트 기반)
+# =====================================================
+port_daily = returns.dot(weights)
+cum = (1 + port_daily).cumprod()
 
-# ---------------------------------
-# 누적 수익률
-# ---------------------------------
-cum = (1 + returns).cumprod()
+# =====================================================
+# 📈 프로 성과 지표
+# =====================================================
 
-# ---------------------------------
+# CAGR
+days = len(cum)
+cagr = (cum.iloc[-1] ** (252/days) - 1) * 100
+
+# Sharpe Ratio (무위험 수익률 2% 가정)
+rf = 0.02
+sharpe = (port_daily.mean()*252 - rf) / (port_daily.std()*np.sqrt(252))
+
+# MDD
+rolling_max = cum.cummax()
+drawdown = cum / rolling_max - 1
+mdd = drawdown.min() * 100
+
+# =====================================================
 # 레이아웃
-# ---------------------------------
-left, right = st.columns([2,1])
+# =====================================================
+left, right = st.columns([3,1])
 
-# =================================================
-# 좌측 : 포트폴리오 전체 현황
-# =================================================
+# =====================================================
+# 좌측 : 포트폴리오 분석
+# =====================================================
 with left:
-    st.subheader("Portfolio Overview")
+    st.subheader("Performance Dashboard")
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Expected Return (1Y)", f"{port_return:.2f}%")
-    k2.metric("Volatility", f"{port_vol:.2f}%")
-    k3.metric("Risk Level", risk_color)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Expected Return", f"{exp_return:.2f}%")
+    k2.metric("Volatility", f"{volatility:.2f}%")
+    k3.metric("CAGR", f"{cagr:.2f}%")
+    k4.metric("Sharpe", f"{sharpe:.2f}")
 
     st.line_chart(cum)
 
-# =================================================
-# 우측 : 종목 / 비중 / 이유 / 알림
-# =================================================
+    st.caption(f"Maximum Drawdown (MDD) : {mdd:.2f}%")
+
+# =====================================================
+# 우측 : 종목 & 비중
+# =====================================================
 with right:
-    st.subheader("Recommended Allocation")
+    st.subheader("Portfolio")
 
     df = pd.DataFrame({
         "Ticker": picks,
-        "Weight": weights
+        "Weight(%)": [round(w*100,2) for w in weights]
     })
-
-    df["Weight"] = (df["Weight"] * 100).round(2)
-
-    # 간단한 추천 이유
-    reasons = {
-        "SPY":"미국 대형주 대표 ETF",
-        "QQQ":"기술주 성장성",
-        "VTI":"미국 전체 시장",
-        "IWM":"중소형주 분산",
-        "VEA":"선진국 분산",
-        "VWO":"신흥국 성장",
-        "TLT":"금리 하락 대비",
-        "IEF":"중기 채권 안정",
-        "GLD":"인플레이션 헤지",
-        "AAPL":"안정적 실적",
-        "MSFT":"클라우드 성장",
-        "NVDA":"AI 핵심 수혜",
-        "AMZN":"커머스 + 클라우드",
-        "GOOGL":"광고 + AI"
-    }
-
-    df["Reason"] = df["Ticker"].map(reasons)
 
     st.dataframe(df, use_container_width=True)
 
-    st.divider()
-
-    # ---------------------------------
-    # 목표 수익 알림
-    # ---------------------------------
-    if port_return >= TARGET_RETURN:
-        st.success("🎯 목표 기대수익률 도달!")
-    else:
-        st.info("목표 수익률 미달 – 성장 자산 확대 가능")
-
-    # ---------------------------------
-    # 리밸런싱 알림
-    # ---------------------------------
-    if port_vol > 20:
-        st.warning("변동성 높음 → 채권/금 확대 리밸런싱 권장")
-    else:
-        st.success("리밸런싱 필요 낮음")
-
-    st.divider()
-
-    # ---------------------------------
-    # 고도화 리셋
-    # ---------------------------------
-    if st.button("전략 다시 계산"):
+    if st.button("AI 전략 다시 계산"):
         st.session_state.picks, st.session_state.weights = generate_portfolio()
         st.cache_data.clear()
         st.rerun()
