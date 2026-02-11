@@ -5,7 +5,7 @@ import numpy as np
 import random
 
 st.set_page_config(layout="wide")
-st.title("Professional Portfolio System - Rebalancing")
+st.title("AI Portfolio Manager - Pro")
 
 # =====================================================
 # 투자 유니버스
@@ -44,11 +44,41 @@ prices = load_price(picks)
 latest_price = prices.iloc[-1]
 
 # =====================================================
-# 수익률
+# 수익률 계산
 # =====================================================
 returns = prices.pct_change().dropna()
 port_daily = returns.dot(weights)
 cum = (1 + port_daily).cumprod()
+
+# =====================================================
+# 📈 프로 성과 지표
+# =====================================================
+days = len(cum)
+
+cagr = (cum.iloc[-1] ** (252/days) - 1) * 100
+vol = port_daily.std() * np.sqrt(252) * 100
+
+rf = 0.02
+sharpe = (port_daily.mean()*252 - rf) / (port_daily.std()*np.sqrt(252))
+
+rolling_max = cum.cummax()
+drawdown = cum / rolling_max - 1
+mdd = drawdown.min() * 100
+
+# =====================================================
+# AI 의사결정 엔진
+# =====================================================
+def ai_decision(cagr, vol, sharpe, mdd):
+    if sharpe > 1 and mdd > -15:
+        return "✅ 전략 우수 → 유지 또는 확대 가능"
+    elif vol > 25:
+        return "⚠ 변동성 높음 → 방어 자산 확대 권장"
+    elif mdd < -25:
+        return "🚨 낙폭 큼 → 일부 비중 축소 검토"
+    else:
+        return "📌 중립 → 정기 리밸런싱 유지"
+
+decision = ai_decision(cagr, vol, sharpe, mdd)
 
 # =====================================================
 # 레이아웃
@@ -56,40 +86,40 @@ cum = (1 + port_daily).cumprod()
 left, right = st.columns([3,1])
 
 # =====================================================
-# 좌측 : 성과
+# 좌측 : 분석
 # =====================================================
 with left:
-    st.subheader("Performance")
+    st.subheader("Performance Dashboard")
 
-    exp_return = port_daily.mean()*252*100
-    vol = port_daily.std()*np.sqrt(252)*100
-
-    k1, k2 = st.columns(2)
-    k1.metric("Expected Return", f"{exp_return:.2f}%")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("CAGR", f"{cagr:.2f}%")
     k2.metric("Volatility", f"{vol:.2f}%")
+    k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    k4.metric("MDD", f"{mdd:.2f}%")
 
     st.line_chart(cum)
 
+    st.success(decision)
+
 # =====================================================
-# 우측 : 리밸런싱 엔진
+# 우측 : 리밸런싱
 # =====================================================
 with right:
-    st.subheader("Rebalancing Engine")
+    st.subheader("Rebalancing")
 
     total_money = st.number_input("총 자산 ($)", value=10000)
 
-    st.write("### 현재 보유 수량 입력")
+    st.write("### 현재 보유 수량")
 
     current_shares = {}
     for t in picks:
         current_shares[t] = st.number_input(f"{t}", min_value=0, value=0)
 
-    # 현재 평가 금액
     current_values = {t: current_shares[t] * latest_price[t] for t in picks}
     current_total = sum(current_values.values())
 
     if current_total == 0:
-        st.info("보유 수량을 입력하면 리밸런싱 계산 시작")
+        st.info("수량 입력 시 계산")
     else:
         rebalance = []
 
@@ -123,12 +153,11 @@ with right:
     # 용어 해설
     # =====================================================
     st.subheader("용어 설명")
-
-    st.caption("Expected Return → 과거 데이터를 기준으로 예상되는 연간 수익률")
-    st.caption("Volatility → 가격 변동성, 높을수록 위험")
-    st.caption("목표비중 → AI가 추천하는 이상적인 투자 비율")
-    st.caption("변경수량 → 목표비중에 맞추기 위해 사고 팔아야 할 주식 수")
-    st.caption("리밸런싱 → 비율이 틀어졌을 때 다시 맞추는 작업")
+    st.caption("CAGR → 연평균 복리 수익률")
+    st.caption("Volatility → 변동성, 위험도 지표")
+    st.caption("Sharpe Ratio → 위험 대비 얼마나 효율적인 수익인가")
+    st.caption("MDD → 최대 손실 구간")
+    st.caption("리밸런싱 → 목표 비율로 되돌리는 매매")
 
     st.divider()
 
