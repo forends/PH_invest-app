@@ -17,13 +17,19 @@ STOCK_UNIVERSE = [
 ]
 
 # =====================================================
-# 데이터
+# 데이터 로드
 # =====================================================
 @st.cache_data
 def load_price(tickers):
     df = yf.download(tickers, period="1y", auto_adjust=True, progress=False)
+
+    # 멀티 인덱스 대응
     if isinstance(df.columns, pd.MultiIndex):
-        df = df["Close"]
+        if "Close" in df.columns.levels[0]:
+            df = df["Close"]
+        else:
+            df = df.xs(df.columns.levels[0][0], axis=1, level=0)
+
     return df.dropna(how="all")
 
 # =====================================================
@@ -40,43 +46,59 @@ if "picks" not in st.session_state:
 picks = st.session_state.picks
 weights = st.session_state.weights
 
+# =====================================================
+# 가격
+# =====================================================
 prices = load_price(picks)
+
+if prices.empty:
+    st.error("가격 데이터를 불러올 수 없습니다.")
+    st.stop()
+
 latest_price = prices.iloc[-1]
 
 # =====================================================
-# 수익률 계산
+# 수익률
 # =====================================================
 returns = prices.pct_change().dropna()
+
+if returns.empty:
+    st.error("수익률 계산 불가")
+    st.stop()
+
 port_daily = returns.dot(weights)
 cum = (1 + port_daily).cumprod()
 
 # =====================================================
-# 📈 프로 성과 지표
+# 📈 성과 지표
 # =====================================================
 days = len(cum)
 
-cagr = (cum.iloc[-1] ** (252/days) - 1) * 100
-vol = port_daily.std() * np.sqrt(252) * 100
+cagr = float((cum.iloc[-1] ** (252/days) - 1) * 100)
+vol = float(port_daily.std() * np.sqrt(252) * 100)
 
 rf = 0.02
-sharpe = (port_daily.mean()*252 - rf) / (port_daily.std()*np.sqrt(252))
+if port_daily.std() == 0:
+    sharpe = 0.0
+else:
+    sharpe = float((port_daily.mean()*252 - rf) / (port_daily.std()*np.sqrt(252)))
 
 rolling_max = cum.cummax()
 drawdown = cum / rolling_max - 1
-mdd = drawdown.min() * 100
+mdd = float(drawdown.min() * 100)
 
 # =====================================================
-# AI 의사결정 엔진
+# AI 의사결정
 # =====================================================
 def ai_decision(cagr, vol, sharpe, mdd):
     if sharpe > 1 and mdd > -15:
-        return "✅ 전략 우수 → 유지 또는 확대 가능"
+        return "전략 우수 → 유지 또는 확대 가능"
     elif vol > 25:
-        return "⚠ 변동성 높음 → 방어 자산 확대 권장"
+        return "변동성 높음 → 방어 자산 확대 권장"
     elif mdd < -25:
-        return "🚨 낙폭 큼 → 일부 비중 축소 검토"
+        return "낙폭 큼 → 일부 비중 축소 검토"
     else:
-        return "📌 중립 → 정기 리밸런싱 유지"
+        return "중립 → 정기 리밸런싱 유지"
 
 decision = ai_decision(cagr, vol, sharpe, mdd)
 
@@ -86,7 +108,7 @@ decision = ai_decision(cagr, vol, sharpe, mdd)
 left, right = st.columns([3,1])
 
 # =====================================================
-# 좌측 : 분석
+# 좌측 : 대시보드
 # =====================================================
 with left:
     st.subheader("Performance Dashboard")
@@ -97,7 +119,8 @@ with left:
     k3.metric("Sharpe Ratio", f"{sharpe:.2f}")
     k4.metric("MDD", f"{mdd:.2f}%")
 
-    st.line_chart(cum)
+    chart_df = pd.DataFrame({"Portfolio": cum})
+    st.line_chart(chart_df, use_container_width=True)
 
     st.success(decision)
 
@@ -113,13 +136,13 @@ with right:
 
     current_shares = {}
     for t in picks:
-        current_shares[t] = st.number_input(f"{t}", min_value=0, value=0)
+        current_shares[t] = st.number_input(f"{t}", min_value=0, value=0, key=f"share_{t}")
 
     current_values = {t: current_shares[t] * latest_price[t] for t in picks}
     current_total = sum(current_values.values())
 
     if current_total == 0:
-        st.info("수량 입력 시 계산")
+        st.info("수량 입력 시 계산됩니다.")
     else:
         rebalance = []
 
@@ -128,8 +151,11 @@ with right:
             diff_value = target_value - current_values[t]
             diff_shares = int(diff_value // latest_price[t])
 
-            action = "매수" if diff_shares > 0 else "매도"
-            if diff_shares == 0:
+            if diff_shares > 0:
+                action = "매수"
+            elif diff_shares < 0:
+                action = "매도"
+            else:
                 action = "유지"
 
             rebalance.append([
@@ -149,72 +175,13 @@ with right:
 
     st.divider()
 
-    #
-
-
-# AdvancedAnalytics.tsx
-import React, { useMemo } from "react";
-
-interface Holding {
-  ticker: string;
-  weight: number;
-  return: number;
-}
-
-interface Props {
-  holdings: Holding[];
-  marketReturn: number;
-  riskFree: number;
-}
-
-export default function AdvancedAnalytics({
-  holdings,
-  marketReturn,
-  riskFree,
-}: Props) {
-  const portfolioReturn = useMemo(
-    () => holdings.reduce((s, h) => s + h.weight * h.return, 0),
-    [holdings]
-  );
-
-  const beta = portfolioReturn / marketReturn;
-
-  const excess = portfolioReturn - riskFree;
-
-  const contribution = holdings.map((h) => ({
-    ticker: h.ticker,
-    value: h.weight * h.return,
-  }));
-
-  const var95 = portfolioReturn * 2.33; // 단순 모델
-
-  return (
-    <div className="space-y-4">
-      <div className="p-4 shadow rounded-2xl">
-        <h2 className="font-bold text-lg mb-2">리스크 분석</h2>
-        <p>베타: {beta.toFixed(2)}</p>
-        <p>초과 수익률: {(excess * 100).toFixed(2)}%</p>
-        <p>95% VaR: {(var95 * 100).toFixed(2)}%</p>
-      </div>
-
-      <div className="p-4 shadow rounded-2xl">
-        <h2 className="font-bold text-lg mb-2">종목 기여도</h2>
-        {contribution.map((c) => (
-          <div key={c.ticker} className="flex justify-between">
-            <span>{c.ticker}</span>
-            <span>{(c.value * 100).toFixed(2)}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-} =====================================================
+    # =====================================================
     # 용어 해설
     # =====================================================
     st.subheader("용어 설명")
     st.caption("CAGR → 연평균 복리 수익률")
     st.caption("Volatility → 변동성, 위험도 지표")
-    st.caption("Sharpe Ratio → 위험 대비 얼마나 효율적인 수익인가")
+    st.caption("Sharpe Ratio → 위험 대비 수익 효율")
     st.caption("MDD → 최대 손실 구간")
     st.caption("리밸런싱 → 목표 비율로 되돌리는 매매")
 
