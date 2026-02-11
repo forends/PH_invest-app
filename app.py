@@ -151,7 +151,7 @@ with right:
 
     #
 
-// 
+
 # AdvancedAnalytics.tsx
 import React, { useMemo } from "react";
 
